@@ -1,0 +1,27 @@
+{
+  "name": "دوتایی | فضای اختصاصی زوجین",
+  "short_name": "دوتایی",
+  "description": "اپلیکیشن اختصاصی زوجین با تقویم شمسی، لیست خرید، انبار خانه، کارهای منزل و آرزوها",
+  "lang": "fa-IR",
+  "dir": "rtl",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FFF8F6",
+  "theme_color": "#C85A3A",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='48' fill='%23C85A3A'/%3E%3Cpath d='M96 146 C96 146 42 110 42 72 C42 50 59 36 78 36 C88 36 96 43 96 51 C96 43 104 36 114 36 C133 36 150 50 150 72 C150 110 96 146 96 146 Z' fill='%23FFFFFF'/%3E%3Ccircle cx='76' cy='78' r='6' fill='%23C85A3A'/%3E%3Ccircle cx='116' cy='78' r='6' fill='%23C85A3A'/%3E%3Cpath d='M84 96 Q96 108 108 96' stroke='%23C85A3A' stroke-width='6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='128' fill='%23C85A3A'/%3E%3Cpath d='M256 388 C256 388 112 294 112 192 C112 134 158 96 208 96 C235 96 256 114 256 136 C256 114 277 96 304 96 C354 96 400 134 400 192 C400 294 256 388 256 388 Z' fill='%23FFFFFF'/%3E%3Ccircle cx='202' cy='208' r='16' fill='%23C85A3A'/%3E%3Ccircle cx='310' cy='208' r='16' fill='%23C85A3A'/%3E%3Cpath d='M224 256 Q256 288 288 256' stroke='%23C85A3A' stroke-width='15' fill='none' stroke-linecap='round'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
