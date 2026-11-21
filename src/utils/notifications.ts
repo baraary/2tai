@@ -93,10 +93,41 @@ export function generateSmartNotifications(state: AppState, now: Date = new Date
   return alerts;
 }
 
+export type NotificationPermissionResult =
+  | NotificationPermission
+  | 'unsupported'
+  | 'insecure';
+
+/**
+ * Safely requests browser Notification permission across modern Promise-based
+ * and legacy callback-based mobile WebViews.
+ */
+export async function requestSystemNotificationPermission(): Promise<NotificationPermissionResult> {
+  if (typeof window === 'undefined' || !('Notification' in window)) {
+    return 'unsupported';
+  }
+  if (!window.isSecureContext) {
+    return 'insecure';
+  }
+  if (Notification.permission === 'granted' || Notification.permission === 'denied') {
+    return Notification.permission;
+  }
+
+  try {
+    const maybePromise = Notification.requestPermission((cbResult) => cbResult);
+    if (maybePromise && typeof maybePromise.then === 'function') {
+      return await maybePromise;
+    }
+    return Notification.permission;
+  } catch {
+    return Notification.permission || 'denied';
+  }
+}
+
 /**
  * Dispatches a real system notification via ServiceWorkerRegistration.showNotification()
  * (required on Android Chrome PWAs where `new Notification()` throws Illegal constructor),
- * with safe fallback to `new Notification()` on desktop browsers.
+ * with timeout protection and safe fallback to `new Notification()` on desktop browsers.
  */
 export async function dispatchSystemNotification(title: string, body: string): Promise<boolean> {
   if (typeof window === 'undefined' || !('Notification' in window)) return false;
@@ -104,7 +135,10 @@ export async function dispatchSystemNotification(title: string, body: string): P
 
   try {
     if ('serviceWorker' in navigator) {
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await Promise.race<ServiceWorkerRegistration | null>([
+        navigator.serviceWorker.ready.catch(() => null),
+        new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1500)),
+      ]);
       if (reg && typeof reg.showNotification === 'function') {
         await reg.showNotification(title, {
           body,

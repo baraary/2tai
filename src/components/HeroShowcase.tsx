@@ -1,10 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Layers, PartyPopper, Plus, SlidersHorizontal } from 'lucide-react';
+import {
+  CalendarClock,
+  ChevronLeft,
+  ChevronRight,
+  Layers,
+  PartyPopper,
+  Pin,
+  Plus,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { CategoryIcon, HeroArtwork } from '../data/assets';
 import type { CategoryItem, CoupleEvent, HeroDisplayMode } from '../types/app';
 import { launchPastelConfetti, triggerHaptic } from '../utils/celebration';
 import { getNextOccurrenceInfo, JALALI_MONTHS, toFa } from '../utils/jalali';
 import { playSound } from '../utils/soundEffects';
+
+const HERO_FILTER_STORAGE_KEY = 'dotaee_hero_filter_v1';
+type HeroFilterMode = 'upcoming' | 'pinned';
 
 interface HeroShowcaseProps {
   events: CoupleEvent[];
@@ -29,6 +41,14 @@ export const HeroShowcase: React.FC<HeroShowcaseProps> = ({
 }) => {
   const [now, setNow] = useState(() => new Date());
   const [slideIdx, setSlideIdx] = useState(0);
+  const [heroFilter, setHeroFilter] = useState<HeroFilterMode>(() => {
+    try {
+      const saved = localStorage.getItem(HERO_FILTER_STORAGE_KEY);
+      return saved === 'pinned' ? 'pinned' : 'upcoming';
+    } catch {
+      return 'upcoming';
+    }
+  });
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const swipedRef = useRef(false);
   const celebratedRef = useRef(false);
@@ -39,31 +59,56 @@ export const HeroShowcase: React.FC<HeroShowcaseProps> = ({
     return () => window.clearInterval(id);
   }, []);
 
+  const pinnedEvents = useMemo(() => events.filter((e) => e.pinned), [events]);
+  const effectiveFilter: HeroFilterMode =
+    heroFilter === 'pinned' && pinnedEvents.length > 0 ? 'pinned' : 'upcoming';
+
+  const handleChangeFilter = (mode: HeroFilterMode) => {
+    setHeroFilter(mode);
+    setSlideIdx(0);
+    try {
+      localStorage.setItem(HERO_FILTER_STORAGE_KEY, mode);
+    } catch {
+      // ignore storage errors
+    }
+  };
+
   const heroEvents = useMemo(() => {
     if (events.length === 0) return [];
-    const pinned = events.filter((e) => e.pinned);
-    const seedList = pinned.length > 0 ? pinned : [events[0]];
-    const byId = new Map<string, CoupleEvent>();
 
-    for (const pe of seedList) {
-      byId.set(pe.id, pe);
-      const [py, pm, pd] = pe.dateKey.split('-').map(Number);
-      for (const other of events) {
-        if (byId.has(other.id)) continue;
-        const [oy, om, od] = other.dateKey.split('-').map(Number);
-        if (om === pm && od === pd && (oy === py || pe.repeatYearly || other.repeatYearly)) {
-          byId.set(other.id, other);
+    const sortByNearest = (list: CoupleEvent[]) =>
+      [...list].sort((a, b) => {
+        const ia = getNextOccurrenceInfo(a, now);
+        const ib = getNextOccurrenceInfo(b, now);
+        if (ia.isPast !== ib.isPast) return ia.isPast ? 1 : -1;
+        return ia.diffMs - ib.diffMs;
+      });
+
+    if (effectiveFilter === 'pinned') {
+      const byId = new Map<string, CoupleEvent>();
+      for (const pe of pinnedEvents) {
+        byId.set(pe.id, pe);
+        const [py, pm, pd] = pe.dateKey.split('-').map(Number);
+        for (const other of events) {
+          if (byId.has(other.id)) continue;
+          const [oy, om, od] = other.dateKey.split('-').map(Number);
+          if (om === pm && od === pd && (oy === py || pe.repeatYearly || other.repeatYearly)) {
+            byId.set(other.id, other);
+          }
         }
       }
+      return sortByNearest(Array.from(byId.values()));
     }
 
-    return Array.from(byId.values()).sort((a, b) => {
-      const ia = getNextOccurrenceInfo(a, now);
-      const ib = getNextOccurrenceInfo(b, now);
-      if (ia.isPast !== ib.isPast) return ia.isPast ? 1 : -1;
-      return ia.diffMs - ib.diffMs;
-    });
-  }, [events, now]);
+    // 'upcoming' mode: show nearest upcoming events regardless of pin status (up to 6)
+    const sortedAll = sortByNearest(events);
+    const upcomingOnly = sortedAll.filter((ev) => !getNextOccurrenceInfo(ev, now).isPast);
+    if (upcomingOnly.length > 0) {
+      return upcomingOnly.slice(0, 6);
+    }
+    // Fallback if all events are in the past: show most recent ones
+    return sortedAll.slice(0, 3);
+  }, [effectiveFilter, events, now, pinnedEvents]);
 
   const safeIdx = heroEvents.length > 0 ? slideIdx % heroEvents.length : 0;
 
@@ -182,6 +227,9 @@ export const HeroShowcase: React.FC<HeroShowcaseProps> = ({
             <div className="flex items-center gap-1.5 text-xs font-bold text-white/90">
               <CategoryIcon name={catObj?.icon || 'heart'} className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">{ev.category}</span>
+              {ev.pinned && (
+                <Pin className="w-3 h-3 shrink-0 opacity-90" aria-label="پین‌شده" />
+              )}
               {info.yearsElapsed > 0 && (
                 <>
                   <span aria-hidden="true">·</span>
@@ -299,56 +347,117 @@ export const HeroShowcase: React.FC<HeroShowcaseProps> = ({
     );
   };
 
+  const showControls = pinnedEvents.length > 0 || heroEvents.length > 1;
+
   return (
     <section className="space-y-3" aria-label="شمارش معکوس رویدادهای مهم">
-      {heroEvents.length > 1 && (
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-            {heroEvents.map((ev, i) => {
-              const active = displayMode === 'slider' && i === safeIdx;
-              return (
+      {showControls && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            {pinnedEvents.length > 0 ? (
+              <div
+                className="inline-flex items-center p-1 rounded-2xl gap-1"
+                style={{
+                  backgroundColor: 'var(--md-surface-container)',
+                  border: '1px solid var(--md-outline-variant)',
+                }}
+              >
                 <button
-                  key={ev.id}
                   type="button"
-                  onClick={() => (displayMode === 'slider' ? setSlideIdx(i) : onEditEvent(ev))}
-                  className="px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+                  onClick={() => handleChangeFilter('upcoming')}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                   style={{
-                    backgroundColor: active
-                      ? 'var(--md-primary-container)'
-                      : 'var(--md-card)',
-                    color: active ? 'var(--md-on-primary-container)' : 'var(--md-on-surface-variant)',
-                    border: active
-                      ? '1px solid transparent'
-                      : '1px solid var(--md-outline-variant)',
+                    backgroundColor:
+                      effectiveFilter === 'upcoming' ? 'var(--md-card)' : 'transparent',
+                    color:
+                      effectiveFilter === 'upcoming'
+                        ? 'var(--md-primary)'
+                        : 'var(--md-on-surface-variant)',
                   }}
                 >
-                  {ev.title}
+                  <CalendarClock className="w-3.5 h-3.5" />
+                  <span>نزدیک‌ترین‌ها</span>
                 </button>
-              );
-            })}
-          </div>
-          <button
-            type="button"
-            onClick={onToggleDisplayMode}
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer"
-            style={{
-              backgroundColor: 'var(--md-card)',
-              color: 'var(--md-on-surface-variant)',
-              border: '1px solid var(--md-outline-variant)',
-            }}
-          >
-            {displayMode === 'slider' ? (
-              <>
-                <Layers className="w-3.5 h-3.5" />
-                <span>نمایش زیر هم</span>
-              </>
+                <button
+                  type="button"
+                  onClick={() => handleChangeFilter('pinned')}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  style={{
+                    backgroundColor:
+                      effectiveFilter === 'pinned' ? 'var(--md-card)' : 'transparent',
+                    color:
+                      effectiveFilter === 'pinned'
+                        ? 'var(--md-primary)'
+                        : 'var(--md-on-surface-variant)',
+                  }}
+                >
+                  <Pin className="w-3.5 h-3.5" />
+                  <span>پین‌شده‌ها ({toFa(pinnedEvents.length)})</span>
+                </button>
+              </div>
             ) : (
-              <>
-                <SlidersHorizontal className="w-3.5 h-3.5" />
-                <span>اسلایدشو</span>
-              </>
+              <span
+                className="text-xs font-bold inline-flex items-center gap-1.5"
+                style={{ color: 'var(--md-on-surface-variant)' }}
+              >
+                <CalendarClock className="w-3.5 h-3.5" style={{ color: 'var(--md-primary)' }} />
+                <span>نزدیک‌ترین رویدادها</span>
+              </span>
             )}
-          </button>
+
+            {heroEvents.length > 1 && (
+              <button
+                type="button"
+                onClick={onToggleDisplayMode}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--md-card)',
+                  color: 'var(--md-on-surface-variant)',
+                  border: '1px solid var(--md-outline-variant)',
+                }}
+              >
+                {displayMode === 'slider' ? (
+                  <>
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>نمایش زیر هم</span>
+                  </>
+                ) : (
+                  <>
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                    <span>اسلایدشو</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+
+          {heroEvents.length > 1 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+              {heroEvents.map((ev, i) => {
+                const active = displayMode === 'slider' && i === safeIdx;
+                return (
+                  <button
+                    key={ev.id}
+                    type="button"
+                    onClick={() => (displayMode === 'slider' ? setSlideIdx(i) : onEditEvent(ev))}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 inline-flex items-center gap-1 transition-colors cursor-pointer"
+                    style={{
+                      backgroundColor: active
+                        ? 'var(--md-primary-container)'
+                        : 'var(--md-card)',
+                      color: active ? 'var(--md-on-primary-container)' : 'var(--md-on-surface-variant)',
+                      border: active
+                        ? '1px solid transparent'
+                        : '1px solid var(--md-outline-variant)',
+                    }}
+                  >
+                    {ev.pinned && <Pin className="w-3 h-3 shrink-0 opacity-75" />}
+                    <span>{ev.title}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

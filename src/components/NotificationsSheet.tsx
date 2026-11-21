@@ -1,8 +1,12 @@
-import React, { useState } from 'react';
-import { Bell, BellRing, CheckCircle2 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertCircle, Bell, BellRing, CheckCircle2, RefreshCw, Smartphone } from 'lucide-react';
 import type { CoupleStore } from '../hooks/useCoupleStore';
 import type { SmartNotification, TabId } from '../types/app';
-import { dispatchSystemNotification } from '../utils/notifications';
+import {
+  dispatchSystemNotification,
+  requestSystemNotificationPermission,
+  type NotificationPermissionResult,
+} from '../utils/notifications';
 import { BottomSheet } from './BottomSheet';
 
 interface NotificationsSheetProps {
@@ -13,6 +17,13 @@ interface NotificationsSheetProps {
   onNavigate: (tab: TabId) => void;
 }
 
+function readCurrentPermission(): NotificationPermissionResult {
+  if (typeof window === 'undefined') return 'unsupported';
+  if (!window.isSecureContext) return 'insecure';
+  if (!('Notification' in window)) return 'unsupported';
+  return Notification.permission;
+}
+
 export const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
   open,
   onClose,
@@ -21,23 +32,82 @@ export const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
   onNavigate,
 }) => {
   const { state } = store;
-  const [permState, setPermState] = useState<string>(() =>
-    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
+  const [permState, setPermState] = useState<NotificationPermissionResult>(() =>
+    readCurrentPermission()
   );
 
+  const envInfo = useMemo(() => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+      return { isIOS: false, isStandalone: false, isInAppBrowser: false, isInIframe: false };
+    }
+    const ua = navigator.userAgent || '';
+    const isIOS =
+      /iPad|iPhone|iPod/.test(ua) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isStandalone =
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (navigator as unknown as { standalone?: boolean }).standalone === true;
+    const isInAppBrowser = /Instagram|FBAN|FBAV|Telegram|WhatsApp|Line|Snapchat|Twitter|LinkedIn/i.test(
+      ua
+    );
+    let isInIframe = false;
+    try {
+      isInIframe = window.self !== window.top;
+    } catch {
+      isInIframe = true;
+    }
+    return { isIOS, isStandalone, isInAppBrowser, isInIframe };
+  }, []);
+
+  const refreshPermission = useCallback(() => {
+    setPermState(readCurrentPermission());
+  }, []);
+
+  // Re-check live permission whenever sheet opens or user returns from browser/OS settings
+  useEffect(() => {
+    if (!open) return;
+    refreshPermission();
+    const onFocus = () => refreshPermission();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') refreshPermission();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [open, refreshPermission]);
+
   const handleRequestPermission = async () => {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      store.showToast('مرورگر شما از اعلان سیستمی پشتیبانی نمی‌کند');
+    if (envInfo.isInAppBrowser) {
+      store.showToast('لطفاً سایت را در مرورگر Chrome یا Safari باز کنید');
       return;
     }
-    const result = await Notification.requestPermission();
+    if (envInfo.isIOS && !envInfo.isStandalone) {
+      store.showToast('در آیفون ابتدا از منوی Share گزینه Add to Home Screen را بزنید');
+      return;
+    }
+    if (permState === 'denied') {
+      store.showToast('مجوز اعلان در تنظیمات مرورگر مسدود شده؛ راهنمای زیر را انجام دهید');
+      return;
+    }
+
+    const result = await requestSystemNotificationPermission();
     setPermState(result);
+
     if (result === 'granted') {
       const sample = alerts[0]?.title || 'اعلان‌های هوشمند دوتایی با موفقیت فعال شد!';
       await dispatchSystemNotification('دوتایی', sample);
-      store.showToast('اعلان سیستمی فعال شد');
+      store.showToast('اعلان سیستمی با موفقیت فعال شد');
+    } else if (result === 'denied') {
+      store.showToast('مرورگر مجوز اعلان را مسدود کرده است (راهنمای باز کردن زیر را ببینید)');
+    } else if (result === 'default') {
+      store.showToast('پنجره مجوز بسته شد؛ دوباره بزنید و Allow را انتخاب کنید');
+    } else if (result === 'insecure') {
+      store.showToast('اعلان سیستمی فقط روی آدرس امن HTTPS فعال می‌شود');
     } else {
-      store.showToast('مجوز نوتیفیکیشن تایید نشد');
+      store.showToast('این مرورگر از اعلان سیستمی پشتیبانی نمی‌کند');
     }
   };
 
@@ -47,6 +117,21 @@ export const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
     if (ok) store.showToast('اعلان آزمایشی ارسال شد');
     else store.showToast('ابتدا مجوز اعلان مرورگر را فعال کنید');
   };
+
+  const statusText =
+    permState === 'granted'
+      ? 'فعال ✓'
+      : envInfo.isIOS && !envInfo.isStandalone
+        ? 'نیاز به نصب روی صفحه اصلی'
+        : envInfo.isInAppBrowser
+          ? 'مرورگر داخلی محدود است'
+          : permState === 'denied'
+            ? 'مسدود در مرورگر'
+            : permState === 'unsupported'
+              ? 'پشتیبانی نمی‌شود'
+              : permState === 'insecure'
+                ? 'نیاز به HTTPS'
+                : 'آماده فعال‌سازی';
 
   return (
     <BottomSheet
@@ -125,7 +210,10 @@ export const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
         <h3 className="text-xs font-bold" style={{ color: 'var(--md-on-surface-variant)' }}>
           تنظیمات یادآورها
         </h3>
-        <label htmlFor="nf-events" className="flex items-center justify-between gap-2 text-sm font-semibold cursor-pointer py-1">
+        <label
+          htmlFor="nf-events"
+          className="flex items-center justify-between gap-2 text-sm font-semibold cursor-pointer py-1"
+        >
           <span>رویدادها و سالگردهای ۷ روز آینده</span>
           <input
             id="nf-events"
@@ -136,7 +224,10 @@ export const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
             }
           />
         </label>
-        <label htmlFor="nf-expiry" className="flex items-center justify-between gap-2 text-sm font-semibold cursor-pointer py-1">
+        <label
+          htmlFor="nf-expiry"
+          className="flex items-center justify-between gap-2 text-sm font-semibold cursor-pointer py-1"
+        >
           <span>انقضا و اتمام کالاهای انبار خانه</span>
           <input
             id="nf-expiry"
@@ -147,7 +238,10 @@ export const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
             }
           />
         </label>
-        <label htmlFor="nf-tasks" className="flex items-center justify-between gap-2 text-sm font-semibold cursor-pointer py-1">
+        <label
+          htmlFor="nf-tasks"
+          className="flex items-center justify-between gap-2 text-sm font-semibold cursor-pointer py-1"
+        >
           <span>کارهای فوری خانه</span>
           <input
             id="nf-tasks"
@@ -170,31 +264,126 @@ export const NotificationsSheet: React.FC<NotificationsSheetProps> = ({
             <Bell className="w-4 h-4" style={{ color: 'var(--md-primary)' }} />
             <span>اعلان سیستمی دستگاه</span>
           </span>
-          <span className="text-xs font-semibold" style={{ color: 'var(--md-on-surface-variant)' }}>
-            {permState === 'granted'
-              ? 'فعال'
-              : permState === 'denied'
-                ? 'مسدود در مرورگر'
-                : permState === 'unsupported'
-                  ? 'پشتیبانی نمی‌شود'
-                  : 'آماده فعال‌سازی'}
+          <span
+            className="text-xs font-bold"
+            style={{
+              color:
+                permState === 'granted'
+                  ? 'var(--md-success)'
+                  : permState === 'denied'
+                    ? 'var(--md-danger)'
+                    : 'var(--md-on-surface-variant)',
+            }}
+          >
+            {statusText}
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void handleRequestPermission()}
-            className="m3-btn-primary flex-1 text-xs"
+
+        {/* Platform-specific mobile troubleshooting guidance */}
+        {envInfo.isInAppBrowser && (
+          <div
+            className="rounded-xl p-3 text-xs leading-6 flex items-start gap-2"
+            style={{
+              backgroundColor: 'var(--pastel-amber-soft)',
+              border: '1px solid var(--md-outline-variant)',
+            }}
           >
-            فعالسازی اعلان سیستمی
-          </button>
-          {permState === 'granted' && (
+            <Smartphone className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--pastel-amber)' }} />
+            <div>
+              شما صفحه را داخل مرورگر داخلی (تلگرام / اینستاگرام / واتساپ) باز کرده‌اید که اجازه
+              نوتیفیکیشن نمی‌دهد. از منوی سه‌نقطه بالا گزینه <strong>Open in Chrome / Safari</strong>{' '}
+              را بزنید.
+            </div>
+          </div>
+        )}
+
+        {!envInfo.isInAppBrowser && envInfo.isIOS && !envInfo.isStandalone && (
+          <div
+            className="rounded-xl p-3 text-xs leading-6 flex items-start gap-2"
+            style={{
+              backgroundColor: 'var(--pastel-sky-soft)',
+              border: '1px solid var(--md-outline-variant)',
+            }}
+          >
+            <Smartphone className="w-4 h-4 shrink-0 mt-0.5" style={{ color: 'var(--pastel-sky)' }} />
+            <div>
+              <strong>راهنمای آیفون (iOS):</strong> در آیفون اعلان‌ها فقط پس از نصب روی صفحه اصلی
+              کار می‌کنند. دکمه <strong>Share</strong> پایین سافاری را بزنید ←{' '}
+              <strong>Add to Home Screen</strong> ← سپس اپ را از آیکون روی صفحه باز کرده و دوباره
+              دکمه فعال‌سازی را بزنید.
+            </div>
+          </div>
+        )}
+
+        {!envInfo.isInAppBrowser && permState === 'denied' && (
+          <div
+            className="rounded-xl p-3 text-xs leading-6 space-y-1.5"
+            style={{
+              backgroundColor: 'var(--md-danger-container)',
+              border: '1px solid var(--md-outline-variant)',
+            }}
+          >
+            <div className="font-extrabold flex items-center gap-1.5" style={{ color: 'var(--md-danger)' }}>
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>مرورگر قبلاً اعلان این سایت را مسدود کرده است</span>
+            </div>
+            <p style={{ color: 'var(--md-on-surface)' }}>
+              وقتی اعلان مسدود باشد، مرورگر دیگر پنجره تایید نشان نمی‌دهد. برای باز کردن آن:
+            </p>
+            <ul className="list-disc pr-4 space-y-1" style={{ color: 'var(--md-on-surface)' }}>
+              <li>
+                <strong>در مرورگر گوشی (Chrome):</strong> روی آیکون کنار آدرس سایت (بالا سمت چپ/راست)
+                بزنید ← <strong>Permissions / مجوزها</strong> ← <strong>Notifications</strong> را
+                روی <strong>Allow</strong> بگذارید.
+              </li>
+              <li>
+                <strong>اگر اپ نصب‌شده (PWA) است:</strong> انگشت را روی آیکون «دوتایی» نگه دارید ←{' '}
+                <strong>App info</strong> ← <strong>Notifications</strong> را روشن کنید.
+              </li>
+            </ul>
+          </div>
+        )}
+
+        {envInfo.isInIframe && permState !== 'granted' && (
+          <p className="text-[11px] leading-5" style={{ color: 'var(--md-on-surface-variant)' }}>
+            نکته: در حالت پیش‌نمایش داخل کادر (iframe) مرورگر ممکن است پنجره اعلان را نمایش ندهد؛
+            مستقیماً از آدرس اصلی سایت روی گوشی فعال کنید.
+          </p>
+        )}
+
+        <div className="flex items-center gap-2">
+          {permState !== 'granted' ? (
+            <>
+              <button
+                type="button"
+                onClick={() => void handleRequestPermission()}
+                className="m3-btn-primary flex-1 text-xs"
+              >
+                {permState === 'denied' ? 'تلاش مجدد فعال‌سازی' : 'فعالسازی اعلان سیستمی'}
+              </button>
+              {permState === 'denied' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    refreshPermission();
+                    store.showToast('وضعیت مجوز بررسی شد');
+                  }}
+                  className="m3-btn-tonal text-xs px-3"
+                  aria-label="بررسی مجدد مجوز"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>بررسی مجدد</span>
+                </button>
+              )}
+            </>
+          ) : (
             <button
               type="button"
               onClick={() => void handleSendTest()}
-              className="m3-btn-tonal text-xs"
+              className="m3-btn-primary flex-1 text-xs"
             >
-              تست اعلان
+              <BellRing className="w-4 h-4" />
+              <span>ارسال اعلان آزمایشی</span>
             </button>
           )}
         </div>

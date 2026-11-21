@@ -14,13 +14,16 @@ interface JalaliDateFieldsProps {
   label?: string;
 }
 
+const JALALI_YEAR_OPTIONS = Array.from({ length: 201 }, (_, idx) => 1300 + idx);
+
 export const JalaliDateFields: React.FC<JalaliDateFieldsProps> = ({
   idPrefix,
   value,
   onChange,
   label,
 }) => {
-  const [y, m, d] = parseDateKey(value) || [1404, 1, 1];
+  const [rawY, m, d] = parseDateKey(value) || [1404, 1, 1];
+  const y = Math.max(1300, Math.min(1500, rawY));
   const maxDays = getJalaliMonthDays(y, m);
   const clampedDay = Math.min(d, maxDays);
 
@@ -33,10 +36,9 @@ export const JalaliDateFields: React.FC<JalaliDateFieldsProps> = ({
     onChange(makeDateKey(y, nextM, Math.min(clampedDay, maxForNextMonth)));
   };
 
-  const handleYearChange = (rawY: string) => {
-    const parsedY = parseInt(rawY, 10);
-    if (!Number.isFinite(parsedY)) return;
-    const boundedY = Math.max(1300, Math.min(1500, parsedY));
+  const handleYearChange = (nextY: number) => {
+    if (!Number.isFinite(nextY)) return;
+    const boundedY = Math.max(1300, Math.min(1500, nextY));
     const maxForNextYear = getJalaliMonthDays(boundedY, m);
     onChange(makeDateKey(boundedY, m, Math.min(clampedDay, maxForNextYear)));
   };
@@ -90,15 +92,18 @@ export const JalaliDateFields: React.FC<JalaliDateFieldsProps> = ({
           <label htmlFor={`${idPrefix}-year`} className="sr-only">
             سال
           </label>
-          <input
+          <select
             id={`${idPrefix}-year`}
-            type="number"
-            min={1300}
-            max={1500}
             className="m3-input tabular-nums text-center"
             value={y}
-            onChange={(e) => handleYearChange(e.target.value)}
-          />
+            onChange={(e) => handleYearChange(Number(e.target.value))}
+          >
+            {JALALI_YEAR_OPTIONS.map((yearNum) => (
+              <option key={yearNum} value={yearNum}>
+                {toFa(yearNum)}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
     </div>
