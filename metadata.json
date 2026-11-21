@@ -1,0 +1,6 @@
+{
+  "name": "دوتایی (2tai) - اپلیکیشن اختصاصی زوجین",
+  "description": "اپلیکیشن مشترک زوجین با تقویم شمسی، لیست خرید و انبار خانه، کارهای منزل، دفترچه آرزوها، وضعیت روزانه و همگام‌سازی ابری هوشمند",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
